@@ -14,20 +14,21 @@ geolocator = Nominatim(user_agent="specify_your_app_name_here")
 gmaps = googlemaps.Client(key='AIzaSyAgfpS97gZA3mp75ho1_ecO0M7adSDqhAE')
 
 
-class Scheduler():
+class Scheduler:
 
     def __init__(self):
 
         # global data
         self.logdataFile = ''
-        self.companyDBfile = ''
+        # self.companyDBfile = ''
         self.lat = 0.0
         self.lon = 0.0
         self.empId = 0
         self.queue = deque()
         self.r = redis.Redis(host='localhost', port=6379, db=0)
         # self.r.flushall()
-        self.con = self.create_connection('/Users/amoghvenkatesh/PycharmProjects/HackIllinois2019/venv/hackillinois.db')
+        self.con = self.create_connection(
+            '/Users/amoghvenkatesh/PycharmProjects/HackIllinois2019/DataLayer/hackillinois.db')
         # print("Initialized")
 
     # method to log live location of the nurse - stores into the DB
@@ -48,7 +49,7 @@ class Scheduler():
 
         self.lat = (data[self.empId])[0]
         self.lon = (data[self.empId])[1]
-        #con = self.create_connection(self.companyDBfile)
+        # con = self.create_connection(self.companyDBfile)
         cur = self.con.cursor()
         try:
             cur.execute('Insert into DATALOG values(?,?,?,?)', self.empId, self.lat, self.lon, 'now')
@@ -65,12 +66,12 @@ class Scheduler():
             # rows=cur.execute('select * from TASK_DATA')
             # for x in rows:
             #     print(x)
-            res=cur.execute('select task_id from TASK_DATA where due_date = strftime("%m/%d/%Y", date("now")) ORDER BY CASE priority_level WHEN "Low" THEN 3 WHEN "Medium" THEN 2 WHEN "High" THEN 1 END;').fetchall()
+            res = cur.execute(
+                'select task_id from TASK_DATA where due_date = strftime("%m/%d/%Y", date("now")) ORDER BY CASE priority_level WHEN "Low" THEN 3 WHEN "Medium" THEN 2 WHEN "High" THEN 1 END;').fetchall()
 
-            
             # con.commit()
 
-            #ids = cur.fetchall()
+            # ids = cur.fetchall()
 
             for x in res:
                 self.queue.append(x)
@@ -87,10 +88,10 @@ class Scheduler():
             if val >= 4:
                 self.reassign()
                 return
-            r.set(self.empId + 'wait-counter', val + 1)
+            self.r.set(self.empId + 'wait-counter', val + 1)
 
     def check_candidacy(self):
-        #con = self.create_connection(self.companyDBfile)
+        # con = self.create_connection(self.companyDBfile)
         cur = self.con.cursor()
         curtime = str(time.time())
         # if not starttime:
@@ -119,13 +120,13 @@ class Scheduler():
 
         # check the feasibility if the candidate is avaialble to take up the wor
         if not completedtask + curtask > 3 or not int(curtime) - int(starttime) >= 8 * 60 * 60 * 100:
-            task_time = (float(curtime) - float(starttime))/(60*60*1000)
+            task_time = 8 - (float(curtime) - float(starttime)) / (60 * 60 * 1000)
             task = self.check_feasibility(task_time)
-            print(task)
+            # print(task)
             if task != None:
                 # assigning the task
                 # print(Eid,"assigned",task)
-                r.set(self.empId + 'curtask', task)
+                self.r.set(str(self.empId) + 'curtask', task)
 
                 print("TASK ASSIGNED:", task)
 
@@ -134,6 +135,13 @@ class Scheduler():
         self.r.delete(self.empId + 'curtask')
         # update the priority queue
         self.queue.appendleft(taskid)
+
+    def get_hours(self, string_time):
+        time_ar = string_time.split(' ')
+        hour = float(time_ar[0])
+        if time_ar[3]:
+            minutes = float(time_ar[2])
+        return hour + minutes / 60.0
 
     def check_feasibility(self, remaining_employee_shift_time):
         # get employee's current address
@@ -146,9 +154,11 @@ class Scheduler():
             task_id = self.queue.popleft()
             patient_address, treatment_time = self.get_patient_address(task_id)
             p_lat, p_lon = self.compute_patient_latLong(patient_address)
-            travel_time = self.compute_eta((self.lat, self.lon), (p_lat, p_lon))
-            if travel_time + treatment_time <= remaining_employee_shift_time:
-                return task_id
+            if (p_lat, p_lon) != (0, 0):
+                travel_time = self.compute_eta((self.lat, self.lon), (p_lat, p_lon))
+                if travel_time is not None:
+                    if self.get_hours(travel_time) + treatment_time <= remaining_employee_shift_time:
+                        return task_id[0]
         return None
 
     def get_employee_current_ping(self, emp_id):
@@ -158,8 +168,8 @@ class Scheduler():
         return self.queue[top]
 
     def get_patient_address(self, t_id):
-        con = self.create_connection(self.companyDBfile)
-        cur = con.cursor()
+        # con = self.create_connection(self.companyDBfile)
+        cur = self.con.cursor()
         # Get address of patient given a task ID t_id
         try:
             cur.execute(
@@ -172,12 +182,19 @@ class Scheduler():
 
     def compute_patient_latLong(self, address):
         location = geolocator.geocode(address)
+        if location is None:
+            return 0, 0
         return location.latitude, location.longitude
 
     def compute_eta(self, coords_1, coords_2):
         my_dist = \
-        gmaps.distance_matrix(geolocator.reverse(coords_2).address, geolocator.reverse(coords_1).address)['rows'][0][
-            'elements'][0]
+            gmaps.distance_matrix(geolocator.reverse(coords_2).address, geolocator.reverse(coords_1).address)['rows'][
+                0][
+                'elements'][0]
+        try:
+            my_dist['duration']['text']
+        except:
+            return None
         return (my_dist['duration']['text'])
 
     # create a connection to the database and return the con object
