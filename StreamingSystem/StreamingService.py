@@ -13,10 +13,11 @@ redis_host = "localhost"
 redis_port = 6379
 redis_password = ""
 
+
 class Producer(threading.Thread):
+
     def __init__(self):
-        threading.Thread.__init__(self)
-        self.stop_event = threading.Event()
+        self.producer = KafkaProducer(bootstrap_servers='localhost:9092')
 
     def stop(self):
         self.stop_event.set()
@@ -28,41 +29,36 @@ class Producer(threading.Thread):
             time.sleep(delay)
             print("%s: %s" % ({"Eid": (geocordinates[0], geocordinates[1])}))
 
-
-    def run(self):
-        producer = KafkaProducer(bootstrap_servers='localhost:9092')
-
-        while not self.stop_event.is_set():
-            producer.send('test', b"test")
-            producer.send('test', b"\xc2Hola, pavan unnu eda!")
-            # Create two threads as follows
-            # try:
-            #     _thread.start_new_thread(print_lat_lan("filename", 2,))
-            #     _thread.start_new_thread(print_lat_lan("filename", 2,))
-            # except:
-            #     print("Error: unable to start thread")
-            # time.sleep(1)
-
-        producer.close()
+    def run(self, topic, event):
+        print("Producing event", event)
+        self.producer.send(topic, event)
+        # producer.send('test', b"\xc2Hola, pavan unnu eda!")
+        # Create two threads as follows
+        # try:
+        #     _thread.start_new_thread(print_lat_lan("filename", 2,))
+        #     _thread.start_new_thread(print_lat_lan("filename", 2,))
+        # except:
+        #     print("Error: unable to start thread")
+        # time.sleep(1)
 
 
-
-class Consumer(multiprocessing.Process):
+class Consumer:
     def __init__(self):
-        multiprocessing.Process.__init__(self)
-        self.stop_event = multiprocessing.Event()
+        # multiprocessing.Process.__init__(self)
+        # self.stop_event = multiprocessing.Event()
+        self.consumer = KafkaConsumer(bootstrap_servers='localhost:9092',
+                                      auto_offset_reset='earliest',
+                                      consumer_timeout_ms=1000)
 
     def stop(self):
         self.stop_event.set()
 
     def run(self):
-        consumer = KafkaConsumer(bootstrap_servers='localhost:9092',
-                                 auto_offset_reset='earliest',
-                                 consumer_timeout_ms=1000)
-        consumer.subscribe(['test'])
+
+        self.consumer.subscribe(['test'])
 
         while not self.stop_event.is_set():
-            for message in consumer:
+            for message in self.consumer:
                 try:
 
                     # The decode_repsonses flag here directs the client to convert the responses from Redis into Python strings
@@ -81,31 +77,31 @@ class Consumer(multiprocessing.Process):
                 if self.stop_event.is_set():
                     break
 
+        self.consumer.close()
 
-        consumer.close()
+    def consume_real_time_pings(self):
+        self.consumer.subscribe(['test'])
 
+        cosumed_events = []
+        while not self.stop_event.is_set():
+            for message in self.consumer:
+                try:
 
-def main():
-    tasks = [
-        Producer(),
-        Consumer()
-    ]
+                    # The decode_repsonses flag here directs the client to convert the responses from Redis into Python strings
+                    # using the default encoding utf-8.  This is client specific.
 
-    for t in tasks:
-        t.start()
+                    # r = redis.Redis(host=redis_host, port=redis_port, password=redis_password, decode_responses=True)
 
-    time.sleep(10)
+                    # step 4: Set the hello message in Redis
+                    # r.set("msg:hello", message)
 
-    for task in tasks:
-        task.stop()
+                    # step 5: Retrieve the hello message from Redis
+                    # msg = r.get("msg:hello")
+                    cosumed_events.append(message)
+                except Exception as e:
+                    print(e)
+                if self.stop_event.is_set():
+                    break
 
-    for task in tasks:
-        task.join()
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        format='%(asctime)s.%(msecs)s:%(name)s:%(thread)d:%(levelname)s:%(process)d:%(message)s',
-        level=logging.INFO
-    )
-    main()
+        self.consumer.close()
+        return cosumed_events
